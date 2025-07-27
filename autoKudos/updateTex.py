@@ -1,111 +1,139 @@
-from playwright.sync_api import sync_playwright
 import os
-from collections.abc import Callable
-from dotenv import load_dotenv
 import json
+from typing import Tuple
+from pathlib import Path
 
+from dotenv import load_dotenv
+from playwright.sync_api import sync_playwright, Download
+
+# Load environment variables
 load_dotenv()
-templatePath = os.getenv("templatePath") # this includes template.tex
-cookies = os.getenv("cookies")
 
-cookies = json.loads(cookies)
-def getKudosDetails():
-    cwd = os.getcwd()
-    parent_dir = os.path.basename(os.path.dirname(cwd))
-    return int(os.path.basename(cwd).replace("supo", "")), parent_dir
+TEMPLATE_PATH = os.getenv("templatePath")
+COOKIES_JSON = os.getenv("cookies")
 
+if TEMPLATE_PATH is None:
+    raise EnvironmentError("Missing 'templatePath' in environment variables.")
+if COOKIES_JSON is None:
+    raise EnvironmentError("Missing 'cookies' in environment variables.")
 
-def updateTex():
-    if not os.path.isfile("supo.tex"):
-        raise FileExistsError("no supo in CWD")
-    with open("supo.tex") as f:
-        tex = f.read()
-    if not "\\documentclass{article}" in tex:
-        raise ValueError("supo.tex does not contain a \\documentclass{article}")
+COOKIES = json.loads(COOKIES_JSON)
 
+# === Utility Functions ===
 
-    s = """\\input{infofile.tex}
-\\documentclass[10pt,\\jkfside,a4paper]{article}
-\\input{""" + templatePath + "}"
+def camel_case(text: str) -> str:
+    """Converts space-separated text to camelCase."""
+    return ''.join(word.capitalize() if i > 0 else word.lower() for i, word in enumerate(text.split()))
 
 
-    with open("modifiedSupo.tex", "w") as f:
-        f.write(tex.replace("\\documentclass{article}", s))
-    print("modified supo created")
+def get_kudos_details() -> Tuple[int, str]:
+    """Extracts supervision number and subject name from the current directory path."""
+    cwd = Path.cwd()
+    supo_number = int(cwd.name.replace("supo", ""))
+    subject = cwd.parent.name
+    return supo_number, subject
 
 
-def getCookiesToFile():
+def update_tex_file(template_path: str) -> None:
+    """Updates 'supo.tex' with template settings, writing to 'modifiedSupo.tex'."""
+    input_file = Path("supo.tex")
+    output_file = Path("modifiedSupo.tex")
+
+    if not input_file.exists():
+        raise FileNotFoundError("supo.tex not found in current directory.")
+
+    content = input_file.read_text()
+
+    if "\\documentclass{article}" not in content:
+        raise ValueError("supo.tex does not contain a '\\documentclass{article}'")
+
+    header_insert = (
+        "\\input{infofile.tex}\n"
+        "\\documentclass[10pt,\\jkfside,a4paper]{article}\n"
+        f"\\input{{{template_path}}}"
+    )
+
+    new_content = content.replace("\\documentclass{article}", header_insert)
+    output_file.write_text(new_content)
+
+    print("Modified supo.tex written to 'modifiedSupo.tex'")
+
+
+def get_cookies_to_file() -> None:
+    """Interactively logs in and saves session cookies to 'cookies.json'."""
     with sync_playwright() as p:
-        # Launch a Chromium browser
-        browser = p.chromium.launch(headless=False)  # Set headless=False to see the browser
+        browser = p.chromium.launch(headless=False)
         page = browser.new_page()
-        
-        # Navigate to a webpage
-        page.goto('https://kudos.chu.cam.ac.uk/login')
-        
-        # Take a screenshot
-        page.click('a[alt="Login using the Raven web authentication system"][title="Login using the Raven web authentication system"]')
-        page.wait_for_url('https://kudos.chu.cam.ac.uk/login', timeout=1000000)
 
-        # Close the browser
-        cookies= page.context.cookies()
+        page.goto('https://kudos.chu.cam.ac.uk/login')
+        page.click('a[alt="Login using the Raven web authentication system"]')
+        page.wait_for_url('https://kudos.chu.cam.ac.uk/login', timeout=600000)
+
+        cookies = page.context.cookies()
         with open("cookies.json", "w") as f:
             json.dump(cookies, f)
-        
+
+        print("Cookies saved to 'cookies.json'")
         browser.close()
-    
-def downloadCorrectInfoFile(subjectName:str, supoNumber:int):
+
+
+def download_correct_info_file(subject_name: str, supo_number: int, cookies: list) -> None:
+    """Logs into Kudos and downloads the infofile.tex for the given subject and supervision."""
     with sync_playwright() as p:
-        # Launch a Chromium browser
-        browser = p.chromium.launch(headless=True)  # Set headless=False to see the browser
+        browser = p.chromium.launch(headless=True)
         context = browser.new_context()
         context.add_cookies(cookies)
         page = context.new_page()
 
-        download_path = os.path.join(os.getcwd(), "infofile.tex")  # Specify the full path
-        page.on("download", lambda d: d.save_as(download_path))
+        infofile_path = Path.cwd() / "infofile.tex"
 
-        # Navigate to a webpage
+        def save_download(download: Download):
+            download.save_as(str(infofile_path))
+
+        page.on("download", save_download)
+
+        print("Logging into Kudos")
         page.goto('https://kudos.chu.cam.ac.uk/login')
-        print("logging into kudos")
-
-        # Take a screenshot
-        page.click('a[alt="Login using the Raven web authentication system"][title="Login using the Raven web authentication system"]')
+        page.click('a[alt="Login using the Raven web authentication system"]')
         page.wait_for_url('https://kudos.chu.cam.ac.uk/login', timeout=10000)
-        print("logged into kudos")
+
+        print("Loading supo page")
         page.click('a.nav-link.dropdown-toggle:has-text("Supervisions")')
         page.click('a.dropdown-item:has-text("Booking")')
-        print("loading supos page")
         page.wait_for_url('https://kudos.chu.cam.ac.uk/supervisions/booking', timeout=10000)
         page.wait_for_selector('thead.table-dark')
-        print("loaded supos page")
-        page.screenshot(path="ex2.png")
 
-
+        print("Looking for matching supo")
         rows = page.query_selector_all('table tbody tr')
         for row in rows:
-            column_1_text = row.query_selector('td:nth-child(1)').inner_text()
-            links_in_column_5 = row.query_selector_all('td:nth-child(5) a')  # All links in column 3
-           # Filter the links in column 5 that match the desired text
-            matching_links = [link for link in links_in_column_5 if link.text_content() == f"SV#{supoNumber+1}"]
-            # If the subject name matches the one in the first column
-            if camelCase(subjectName).lower() in camelCase(column_1_text).lower() and matching_links:
-                # Click the first matching link in column 5
-                absolute_url = matching_links[0].get_attribute("href")
-                page.click(f'a[href="{absolute_url}"]')
+            subject_text = row.query_selector('td:nth-child(1)').inner_text()
+            links = row.query_selector_all('td:nth-child(5) a')
+            matching = [
+                link for link in links
+                if link.text_content() == f"SV#{supo_number + 1}" # might change to be non 0 indexed for simplicity
+            ]
+
+            if camel_case(subject_name).lower() in camel_case(subject_text).lower() and matching:
+                href = matching[0].get_attribute("href")
+                page.click(f'a[href="{href}"]')
                 page.wait_for_event('download')
-            
+                print("Download started.")
+                break
+        else:
+            print("No matching supervision found.")
+
         browser.close()
 
-camelCase :Callable[[str], str] = lambda string_with_spaces:''.join(word.capitalize() if i > 0 else word.lower() for i, word in enumerate(string_with_spaces.split()))
+
+# === Entry Point ===
 
 if __name__ == "__main__":
-    supNum, subj = getKudosDetails()
-    
-    if not os.path.isfile("infofile.tex"):
+    supo_number, subject = get_kudos_details()
+
+    if not Path("infofile.tex").exists():
         print("infofile.tex not found — downloading...")
-        downloadCorrectInfoFile(subj, supNum)
+        download_correct_info_file(subject, supo_number, COOKIES)
     else:
         print("infofile.tex already exists — skipping download.")
-    
-    updateTex()
+
+    update_tex_file(TEMPLATE_PATH)

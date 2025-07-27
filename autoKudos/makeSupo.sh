@@ -48,6 +48,13 @@ if [ ! -d "$VENV_DIR" ]; then
     echo "Failed to install requirements" >&2
     exit 1
   }
+
+  # Run playwright install to download browsers
+  echo "Running 'playwright install' to download browsers..."
+  "$VENV_DIR/bin/playwright" install || {
+    echo "Failed to install playwright browsers" >&2
+    exit 1
+  }
 fi
 
 # --- Step 4: Run the Python script ---

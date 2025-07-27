@@ -1,3 +1,4 @@
+import argparse
 import os
 import json
 from typing import Tuple, List
@@ -6,19 +7,40 @@ from pathlib import Path
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, Download, Page, BrowserContext, Cookie
 
-# Load environment variables
-load_dotenv()
 
-TEMPLATE_PATH: str | None = os.getenv("templatePath")
-COOKIES_JSON: str | None = os.getenv("cookies")
+def write_env(cookies_json: str, env_file: str = ".env") -> None:
+    env_path = Path(env_file)
 
-if TEMPLATE_PATH is None:
-    raise EnvironmentError("Missing 'templatePath' in environment variables.")
-if COOKIES_JSON is None:
-    raise EnvironmentError("Missing 'cookies' in environment variables.")
+    # Remove the existing .env file if it exists
+    if env_path.exists():
+        try:
+            env_path.unlink()
+            print(f"Removed existing {env_file}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to remove {env_file}: {e}")
 
-COOKIES: List[Cookie] = json.loads(COOKIES_JSON)
+    # Write the new .env file
+    content = f"cookies={cookies_json}\n"
+    env_path.write_text(content)
+    print(f"Created fresh {env_file} with cookies.")
 
+def ensure_cookies_in_env(env_file: str = ".env") -> str:
+    """
+    If missing or empty, launches browser login to retrieve cookies,
+    updates the .env file, reloads environment variables,
+    """
+
+    cookies_json = retrieve_kudos_cookies()
+    write_env(cookies_json,  env_file=env_file)
+
+    # Reload updated environment variables
+    load_dotenv(env_file, override=True)
+    COOKIES_JSON = os.getenv("cookies")
+
+    if COOKIES_JSON is None or COOKIES_JSON.strip() in ("", "[]"):
+        raise EnvironmentError("Failed to load cookies even after retrieval.")
+
+    return COOKIES_JSON
 
 # === Utility Functions ===
 
@@ -60,22 +82,30 @@ def update_tex_file(template_path: str) -> None:
     print("Modified supo.tex written to 'modifiedSupo.tex'")
 
 
-def get_cookies_to_file() -> None:
-    """Interactively logs in and saves session cookies to 'cookies.json'."""
+
+def retrieve_kudos_cookies() -> str:
+    """
+    Opens a browser for manual login to Kudos,
+    captures cookies after login,
+    and returns them as a JSON string.
+    """
+    print("Launching browser to log in and capture cookies...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
-        page: Page = browser.new_page()
+        context = browser.new_context()
+        page = context.new_page()
 
         page.goto('https://kudos.chu.cam.ac.uk/login')
         page.click('a[alt="Login using the Raven web authentication system"]')
-        page.wait_for_url('https://kudos.chu.cam.ac.uk/login', timeout=600000)
 
-        cookies: List[Cookie] = page.context.cookies()
-        with open("cookies.json", "w") as f:
-            json.dump(cookies, f)
+        # Wait for a URL that does NOT contain 'login' indicating successful login
+        page.wait_for_url(lambda url: "kudos.chu.cam.ac.uk" in url and "login" not in url, timeout=600000)
 
-        print("Cookies saved to 'cookies.json'")
+        cookies = context.cookies()
+        cookies_json = json.dumps(cookies)
+
         browser.close()
+    return cookies_json
 
 
 def download_correct_info_file(subject_name: str, supo_number: int, cookies: List[Cookie]) -> None:
@@ -127,9 +157,27 @@ def download_correct_info_file(subject_name: str, supo_number: int, cookies: Lis
         browser.close()
 
 
-# === Entry Point ===
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env-file", default=str(Path(__file__).parent / ".env"), help="Path to .env file")
+    parser.add_argument("--template-path", required=True, help="Template path to write to .env")
+    args = parser.parse_args()
+
+    TEMPLATE_PATH = args.template_path
+
+    COOKIES_JSON: str | None = os.getenv("cookies")
+
+    if TEMPLATE_PATH is None:
+        raise EnvironmentError("Missing 'templatePath' in environment variables.")
+
+    if COOKIES_JSON is None:
+        COOKIES_JSON = ensure_cookies_in_env(args.env_file)
+        if not isinstance(COOKIES_JSON, str) or COOKIES_JSON.strip() in ("", "[]"):
+            raise Exception("Cookies retrieval failed or returned empty content.")
+        
+    COOKIES: List[Cookie] = json.loads(COOKIES_JSON)
+
     supo_number, subject = get_kudos_details()
 
     if not Path("infofile.tex").exists():

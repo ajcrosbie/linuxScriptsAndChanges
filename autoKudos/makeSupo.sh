@@ -14,13 +14,6 @@ TEMPLATE_PATH="$PROJECT_DIR/template.tex"
 INCLUDES_PATH="$PROJECT_DIR/includes.tex"
 ENV_FILE="$PROJECT_DIR/.env"
 
-# --- Step 1: Update .env (non-destructively) ---
-touch "$ENV_FILE"
-if grep -q "^templatePath=" "$ENV_FILE"; then
-  sed -i "s|^templatePath=.*|templatePath=$TEMPLATE_PATH|" "$ENV_FILE"
-else
-  echo "templatePath=$TEMPLATE_PATH" >> "$ENV_FILE"
-fi
 
 # --- Step 2: Update template.tex to point to includes.tex ---
 if [ -f "$TEMPLATE_PATH" ]; then
@@ -59,4 +52,4 @@ fi
 
 # --- Step 4: Run the Python script ---
 echo "Running updateTex.py..."
-"$VENV_DIR/bin/python" "$PROJECT_DIR/updateTex.py" "$@"
+"$VENV_DIR/bin/python" "$PROJECT_DIR/updateTex.py" --env-file "$ENV_FILE" --template-path "$TEMPLATE_PATH" "$@"

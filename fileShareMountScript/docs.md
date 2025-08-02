@@ -4,6 +4,9 @@ This requires a samba host.
 
 ## Dependencies
 - cifs-utils
+- avahi
+- nss-mdns
+
 
 ## Setup
 ### Script Setup
@@ -11,12 +14,23 @@ This script does require a .env file with the following structure
 
 SMB_USER= the username of the configured samaba user
 SMB_PASS= the password of the configured samba user
-SMB_IP = the IP of the samba host
+SMB_IP = the IP of the samba host (not required unless known to be static)
 SMB_SHARE= the foldernae of the shared resource
+
+To resolve the raspberrypi.local we need to update certain config files
+`/etc/nsswitch.conf`
+
+replace the line starting with 
+`hosts:`
+with 
+`hosts: files mdns4_minimal [NOTFOUND=return] dns mdns`
+
 
 ### Server Setup 
 This is not too horrendous
 Initially this was setup on a debian raspberry pi so the [ubuntu](https://ubuntu.com/tutorials/install-and-configure-samba#1-overview) guide wasn't too difficult to use
+
+#
 
 
 # Encounterd issues 

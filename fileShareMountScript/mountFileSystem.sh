@@ -4,7 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Resolve IP address of raspberrypi.local
 RASPBERRY_HOSTNAME=${SMB_IP:-raspberrypi.local}
-RESOLVED_IP=$(getent hosts "$RASPBERRY_HOSTNAME" | awk '{ print $1 }')
+RESOLVED_IP=$(getent ahostsv4 raspberrypi.local | awk '{ print $1; exit }')
 
 if [ -z "$RESOLVED_IP" ]; then
     echo "Failed to resolve $RASPBERRY_HOSTNAME"
